@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Voice Input Widget (dsh-voice-widget)",
+    "description": "A floating microphone button over the window: click to dictate, click again to insert the transcript into the composer. Transcribes locally with whisper.cpp; free and offline at runtime. Defaults to large-v3; swap models under %LOCALAPPDATA%\\dsh-voice-widget\\whisper\\models to trade speed for accuracy."
+  }
+}

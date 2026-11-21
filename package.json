@@ -1,0 +1,38 @@
+{
+  "name": "dsh-voice-widget",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Free offline dictation widget floating over the DSH window, powered by a local whisper.cpp server.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sabersmaster9/dsh-voice-widget.git"
+  },
+  "homepage": "https://github.com/Sabersmaster9/dsh-voice-widget#readme",
+  "keywords": ["dsh", "deepseek-harness", "plugin", "bundle", "speech-to-text", "whisper"],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "vendor",
+    "locale",
+    "scripts",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

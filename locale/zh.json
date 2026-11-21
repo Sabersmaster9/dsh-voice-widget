@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "语音输入悬浮球 (dsh-voice-widget)",
+    "description": "在窗口上悬浮一个麦克风按钮，点一下开始说话，再点一下把识别出的文字插入当前输入框。本地 whisper.cpp 转写，免费、运行时离线；默认 large-v3 模型，可在 %LOCALAPPDATA%\\dsh-voice-widget\\whisper\\models 里换模型。"
+  }
+}
