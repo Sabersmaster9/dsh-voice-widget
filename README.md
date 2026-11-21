@@ -97,16 +97,25 @@ POST /dsh-voice-widget/stop  ──► normalise (highpass + dynaudnorm)
                                       ▼
                          whisper-server /inference (CUDA, warm) ──► CLI fallback
                                       ▼
-                              OpenCC t→cn ──► insert at caret
+                          OpenCC t→cn ──► punctuation ──► insert at caret
 ```
 
 The overlay button cannot live in DSH's `shell.overlay` stacking context — the slot wraps occupants in a 0×0 box and the
 conversation panel paints above the layer. The widget therefore portals into `document.body` with its own fixed layer.
 Transcript insertion uses a hidden `conversation.input.dock` companion that publishes the session's `inputActions`.
 
+**Punctuation.** whisper only emits commas, full stops and question marks when the request keeps timestamps on, so
+`/inference` is called with `no_timestamps=false` (`-nt` is dropped from the CLI fallback for the same reason); with it,
+a 29 s Chinese utterance comes back as `…吗?也就是…工作时间。那这个时间具体是怎么统计的呢?…`. If a decode still returns
+one run-on line, `lib/punctuate.js` rebuilds sentence marks from the pauses whisper reported: a pause after 吗/呢/吧
+becomes `？`, a pause before 那/然后/所以 stays `，`, any other pause ends the sentence. Every transcript is then trimmed
+and its ASCII `,?!;:` after a Chinese character widened to `，？！；：`.
+
 ## Known limitations
 
 - One utterance at a time, 300 s cap; no continuous dictation, no wake word.
+- Punctuation is the model's own when timestamps are kept; the heuristic fallback only marks sentence ends at pauses, so
+  a clause whispered without any pause stays unseparated.
 - Chinese accuracy still trails cloud transcription (WeChat): the laptop array microphone is quiet (≈ −32 dBFS
   raw speech), and there is no server-side AGC. The capture chain compensates, but very quiet or very fast speech still
   produces errors.
@@ -118,6 +127,8 @@ Transcript insertion uses a hidden `conversation.input.dock` companion that publ
 | File | Role |
 | --- | --- |
 | `index.js` | Host side: capture (pre-warm + tail), whisper server/CLI transcription, OpenCC, `/dsh-voice-widget/*` routes |
+| `lib/punctuate.js` | Sentence marks at decoder pauses, ASCII→full-width widening, CLI timestamp stripping |
+| `test/punctuate.test.mjs` | `node --test test/` covers the punctuation rules |
 | `client.js` | Browser side: floating button, pre-warm on hover, session polling, insertion |
 | `scripts/setup-whisper.ps1` | Downloads whisper.cpp builds and models |
 | `vendor/opencc-t2cn.js` | OpenCC traditional→simplified dictionary, vendored so no install step is needed |

@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { punctuate, stripTimestamps } from './lib/punctuate.js';
 import { Converter as createOpenCCConverter } from './vendor/opencc-t2cn.js';
 
 /** Display name of this Cordis plugin. */
@@ -245,10 +246,10 @@ class Transcriber {
   async run(wavPath) {
     if (await this.ensure()) {
       const text = await this.post(wavPath);
-      if (text !== undefined) return { text: simplify(text) };
+      if (text !== undefined) return { text: punctuate(simplify(text)) };
     }
     const fallback = await transcribeWithCli(this.tools, wavPath);
-    return fallback.text === undefined ? fallback : { text: simplify(fallback.text) };
+    return fallback.text === undefined ? fallback : { text: punctuate(simplify(fallback.text)) };
   }
 
   /** @param wavPath - file to upload. @returns server text, or undefined on failure. */
@@ -257,6 +258,9 @@ class Transcriber {
       const form = new FormData();
       form.append('file', new Blob([readFileSync(wavPath)], { type: 'audio/wav' }), 'clip.wav');
       form.append('response_format', 'json');
+      // Segment boundaries are the only pause information whisper exposes to
+      // us; they are also what `punctuate` turns into commas and full stops.
+      form.append('no_timestamps', 'false');
       const response = await fetch(`http://127.0.0.1:${String(this.port)}/inference`, {
         method: 'POST',
         body: form,
@@ -292,7 +296,7 @@ class Transcriber {
  */
 async function transcribeWithCli(tools, wavPath) {
   const args = [
-    '-m', tools.model, '-l', 'zh', '-f', wavPath, '-nt', '-np', '-bs', '5', '--carry-initial-prompt',
+    '-m', tools.model, '-l', 'zh', '-f', wavPath, '-np', '-bs', '5', '--carry-initial-prompt',
     '-t', String(Math.max(4, Math.min(8, Math.floor((process.env.NUMBER_OF_PROCESSORS ?? '8') / 2) || 4))),
     '--prompt', ZH_PROMPT,
   ];
@@ -322,7 +326,7 @@ async function transcribeWithCli(tools, wavPath) {
     });
     child.on('exit', (code) => {
       clearTimeout(guard);
-      if (code === 0) resolve({ text: out });
+      if (code === 0) resolve({ text: stripTimestamps(out) });
       else resolve({ error: `whisper-cli exited with code ${String(code)}: ${err.trim().split(/\r?\n/).slice(-2).join(' ').slice(0, 300)}` });
     });
   });
