@@ -16,7 +16,8 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { punctuate, stripTimestamps } from './lib/punctuate.js';
+import { needsPunctuation, punctuate, sameText, stripTimestamps } from './lib/punctuate.js';
+import { loudLevel } from './lib/audio.js';
 import { Converter as createOpenCCConverter } from './vendor/opencc-t2cn.js';
 
 /** Display name of this Cordis plugin. */
@@ -32,7 +33,13 @@ const STOP_GRACE_MS = 6_000;
 /** How long one transcription may take before the host gives up on it. */
 const TRANSCRIBE_TIMEOUT_MS = 180_000;
 /** Extra capture kept after a stop click so trailing syllables land in the WAV. */
-const TAIL_MS = 500;
+const TAIL_MS = 300;
+/** Greedy decoding: the fast, hallucination-free pass. */
+const GREEDY_TEMPERATURE = '0';
+/** Sampled decoding that recovers commas, verified against the greedy pass. */
+const PUNCTUATION_TEMPERATURE = '0.8';
+/** Loud-frame level below which a clip is treated as room noise (≈ −36 dBFS). */
+const SILENCE_LEVEL = 0.015;
 /** How long a hover-primed capture waits to be claimed by a click. */
 const PREWARM_TTL_MS = 15_000;
 /** Bytes of WAV that prove ffmpeg is really capturing (≈0.15 s of 16 kHz mono). */
@@ -245,19 +252,34 @@ class Transcriber {
    */
   async run(wavPath) {
     if (await this.ensure()) {
-      const text = await this.post(wavPath);
-      if (text !== undefined) return { text: punctuate(simplify(text)) };
+      const text = await this.post(wavPath, GREEDY_TEMPERATURE);
+      if (text !== undefined) {
+        // Greedy decoding stops at one mark (usually the very last one). A
+        // temperature-sampled pass usually recovers the commas, but it can
+        // also hallucinate a whole sentence out of silence, so its output is
+        // only kept when it says exactly what the greedy pass said.
+        if (needsPunctuation(text)) {
+          const sampled = await this.post(wavPath, PUNCTUATION_TEMPERATURE);
+          if (sampled !== undefined && sameText(text, sampled)) return { text: punctuate(simplify(sampled)) };
+        }
+        return { text: punctuate(simplify(text)) };
+      }
     }
     const fallback = await transcribeWithCli(this.tools, wavPath);
     return fallback.text === undefined ? fallback : { text: punctuate(simplify(fallback.text)) };
   }
 
-  /** @param wavPath - file to upload. @returns server text, or undefined on failure. */
-  async post(wavPath) {
+  /**
+   * @param wavPath - file to upload.
+   * @param temperature - sampling temperature; 0 is greedy.
+   * @returns server text, or undefined on failure.
+   */
+  async post(wavPath, temperature) {
     try {
       const form = new FormData();
       form.append('file', new Blob([readFileSync(wavPath)], { type: 'audio/wav' }), 'clip.wav');
       form.append('response_format', 'json');
+      form.append('temperature', temperature);
       // Segment boundaries are the only pause information whisper exposes to
       // us; they are also what `punctuate` turns into commas and full stops.
       form.append('no_timestamps', 'false');
@@ -557,6 +579,22 @@ class VoiceSession {
   async transcribe() {
     clearTimeout(this.timer);
     this.status = 'transcribing';
+
+    // whisper decodes room noise into stray characters, so measure the raw
+    // capture first: silence costs a decode and can inject a whole sentence.
+    let level = null;
+    try {
+      level = loudLevel(readFileSync(this.wav));
+    } catch {
+      // An unreadable clip falls through to the normal path.
+    }
+    if (level !== null && level < SILENCE_LEVEL) {
+      this.push({ type: 'error', message: 'no speech detected' });
+      this.dropWav();
+      this.finish('empty');
+      return;
+    }
+
     const wav = this.normalize();
     const result = await this.transcriber.run(wav);
 
@@ -721,6 +759,7 @@ export function apply(ctx, config) {
           sendJson(res, 200, {
             ok: !state.toolsError,
             engine: resolved ? 'whisper.cpp' : null,
+            build: 'two-pass',
             warm: Boolean(state.transcriber?.port),
             gpu: resolved?.server ? 'cuda-or-cpu' : 'cpu-cli',
             model: resolved?.model,

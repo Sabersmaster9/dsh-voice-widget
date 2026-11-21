@@ -104,18 +104,31 @@ The overlay button cannot live in DSH's `shell.overlay` stacking context — the
 conversation panel paints above the layer. The widget therefore portals into `document.body` with its own fixed layer.
 Transcript insertion uses a hidden `conversation.input.dock` companion that publishes the session's `inputActions`.
 
-**Punctuation.** whisper only emits commas, full stops and question marks when the request keeps timestamps on, so
-`/inference` is called with `no_timestamps=false` (`-nt` is dropped from the CLI fallback for the same reason); with it,
-a 29 s Chinese utterance comes back as `…吗?也就是…工作时间。那这个时间具体是怎么统计的呢?…`. If a decode still returns
-one run-on line, `lib/punctuate.js` rebuilds sentence marks from the pauses whisper reported: a pause after 吗/呢/吧
-becomes `？`, a pause before 那/然后/所以 stays `，`, any other pause ends the sentence. Every transcript is then trimmed
-and its ASCII `,?!;:` after a Chinese character widened to `，？！；：`.
+**Punctuation.** Greedy whisper decoding puts at most one mark at the very end of a Chinese utterance — `…换更好的模型。`
+— because it never samples the comma tokens. Two things fix that:
+
+1. `/inference` is called with `no_timestamps=false` (`-nt` is dropped from the CLI fallback too). Without it whisper
+   strips every mark, not just the commas.
+2. When a transcript has no inner punctuation and is longer than eight characters, a **second decode at
+   temperature 0.8** runs and recovers the commas: `还有一种方案，就是可以选择用户自己接入API Key，换更好的模型。或者…`.
+   Sampled decoding can hallucinate a whole sentence out of silence (2 s of silence produced *请不吝点赞 订阅 转发 打赏*),
+   so the sampled text is only kept when `sameText` finds it identical to the greedy text apart from punctuation and
+   whitespace (≤ 2 % Levenshtein). Otherwise the greedy text wins.
+
+`lib/punctuate.js` then trims the text, joins decoder segments, widens ASCII `,?!;:` to `，？！；：` where they sit next
+to Chinese (leaving `1,000` alone), and — if a decode still returned one run-on line — rebuilds sentence ends from the
+pauses whisper reported: a pause after 吗/呢/吧 becomes `？`, a pause before 那/然后/所以 stays `，`.
+
+**Silence.** whisper decodes room noise into stray characters (three seconds of nothing came back as `颊。`), so the
+recording is measured before it is decoded: `lib/audio.js` computes the per-frame RMS, and a clip whose loud frames stay
+below 0.015 (≈ −36 dBFS — room noise measures ≈ 0.007, quiet speech starts near 0.02) is dropped without a decode. The
+widget then reports *没听到内容* instead of inserting garbage.
 
 ## Known limitations
 
 - One utterance at a time, 300 s cap; no continuous dictation, no wake word.
-- Punctuation is the model's own when timestamps are kept; the heuristic fallback only marks sentence ends at pauses, so
-  a clause whispered without any pause stays unseparated.
+- Long utterances pay for the punctuation pass twice: a 28 s clip takes ≈ 1.9 s end to end, a 5 s one ≈ 0.6 s. When the
+  sampled decode disagrees with the greedy one, the transcript keeps the model's single end mark.
 - Chinese accuracy still trails cloud transcription (WeChat): the laptop array microphone is quiet (≈ −32 dBFS
   raw speech), and there is no server-side AGC. The capture chain compensates, but very quiet or very fast speech still
   produces errors.
@@ -126,9 +139,10 @@ and its ASCII `,?!;:` after a Chinese character widened to `，？！；：`.
 
 | File | Role |
 | --- | --- |
-| `index.js` | Host side: capture (pre-warm + tail), whisper server/CLI transcription, OpenCC, `/dsh-voice-widget/*` routes |
+| `index.js` | Host side: capture (pre-warm + tail), silence gate, two-pass transcription, OpenCC, `/dsh-voice-widget/*` routes |
 | `lib/punctuate.js` | Sentence marks at decoder pauses, ASCII→full-width widening, CLI timestamp stripping |
-| `test/punctuate.test.mjs` | `node --test test/` covers the punctuation rules |
+| `lib/audio.js` | Loud-frame level of a WAV clip, used to drop room noise before decoding |
+| `test/*.test.mjs` | `node --test test/` covers the punctuation and level rules |
 | `client.js` | Browser side: floating button, pre-warm on hover, session polling, insertion |
 | `scripts/setup-whisper.ps1` | Downloads whisper.cpp builds and models |
 | `vendor/opencc-t2cn.js` | OpenCC traditional→simplified dictionary, vendored so no install step is needed |

@@ -1,6 +1,6 @@
 {
   "name": "dsh-voice-widget",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Free offline dictation widget floating over the DSH window, powered by a local whisper.cpp server.",
@@ -18,7 +18,7 @@
     "./icon": "./icon.svg"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/punctuate.test.mjs test/audio.test.mjs"
   },
   "files": [
     "index.js",
