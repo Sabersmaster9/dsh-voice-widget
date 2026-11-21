@@ -1,0 +1,12 @@
+node_modules/
+*.log
+*.wav
+*.bin
+.DS_Store
+Thumbs.db
+
+# local whisper runtime copied in by scripts/setup-whisper.ps1
+whisper/
+bin/
+cuda/
+models/
